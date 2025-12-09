@@ -3,11 +3,6 @@
 ## 📋 Présentation du Projet
 
 Infrastructure réseau complète avec segmentation VLAN, services web, base de données et monitoring, déployée sur VirtualBox avec automatisation Ansible.
-
-**Étudiant :** [Ton Nom]  
-**Formation :** B2 Informatique  
-**Date :** Décembre 2024
-
 ---
 
 ## 🏗️ Architecture Réseau
