@@ -1,428 +1,760 @@
-# Projet Fil Rouge - Infrastructure Réseau B2
+# PROJET INFRASTRUCTURE RÉSEAUX - SERVICES LINUX
 
-## 📋 Présentation du Projet
+## 👤 Informations
 
-Infrastructure réseau complète avec segmentation VLAN, services web, base de données et monitoring, déployée sur VirtualBox avec automatisation Ansible.
----
-
-## 🏗️ Architecture Réseau
-
-### Schéma Global
-
-                           INTERNET
-                               |
-                        [VM6-Firewall]
-                     (4 interfaces réseau)
-                               |
-        ┌──────────────────────┼──────────────────────┐
-        |                      |                      |
-   VLAN Admin           VLAN Services              VLAN DMZ
-   10.10.99.0/24        10.10.20.0/24          10.10.10.0/24
-        |                      |                      |
-    ┌───▼───┐          ┌───┬───┬───┐            ┌────▼────┐
-    │  VM1  │          │VM3│VM4│VM5 │            │   VM2   │
-    │ Admin │          │DNS│ DB│Mon │            │   Web   │
-    └───────┘          └───┴───┴───┘            └─────────┘
-
-### Architecture Détaillée
-
-| VM | Hostname | IP | VLAN | Services | RAM | CPU | Disk |
-|----|----------|---------|------|----------|-----|-----|------|
-| VM1 | admin.lab.local | 10.10.99.10 | Admin | Ansible | 2GB | 2 | 20GB |
-| VM2 | web.lab.local | 10.10.10.20 | DMZ | Nginx, Docker | 3GB | 2 | 30GB |
-| VM3 | dns.lab.local | 10.10.20.30 | Services | Bind9 | 1GB | 1 | 10GB |
-| VM4 | db.lab.local | 10.10.20.40 | Services | PostgreSQL | 2GB | 2 | 40GB |
-| VM5 | monitoring.lab.local | 10.10.20.50 | Services | Prometheus, Grafana | 3GB | 2 | 30GB |
-| VM6 | firewall.lab.local | 10.10.99.1 / .20.1 / .10.1 | Tous | iptables, routage | 1GB | 1 | 10GB |
-
-**Total ressources :** 12GB RAM, 10 CPU, 140GB disque
+- **Étudiant** : [TON NOM]
+- **Formation** : 2ème année Informatique - Spécialisation Cybersécurité
+- **Date** : 26 Janvier 2026
+- **Projet** : Infrastructure réseau Linux avec services, conteneurisation, monitoring et backups
 
 ---
 
-## 🌐 Plan d'Adressage IP
+## 📋 Table des matières
 
-### VLAN Admin (10.10.99.0/24)
-- **Gateway :** 10.10.99.1 (Firewall)
-- **VM1-Admin :** 10.10.99.10
-- **Usage :** Administration, Ansible, Sauvegardes
-
-### VLAN DMZ (10.10.10.0/24)
-- **Gateway :** 10.10.10.1 (Firewall)
-- **VM2-Web :** 10.10.10.20
-- **Usage :** Services exposés (HTTP/HTTPS)
-
-### VLAN Services (10.10.20.0/24)
-- **Gateway :** 10.10.20.1 (Firewall)
-- **VM3-DNS :** 10.10.20.30
-- **VM4-Database :** 10.10.20.40
-- **VM5-Monitoring :** 10.10.20.50
-- **Usage :** Services internes critiques
+1. [Vue d'ensemble](#vue-densemble)
+2. [Architecture](#architecture)
+3. [Services déployés](#services-déployés)
+4. [Configuration réseau](#configuration-réseau)
+5. [Déploiement](#déploiement)
+6. [Accès aux services](#accès-aux-services)
+7. [Sauvegardes](#sauvegardes)
+8. [Monitoring](#monitoring)
+9. [Sécurité](#sécurité)
+10. [Commandes utiles](#commandes-utiles)
+11. [Troubleshooting](#troubleshooting)
+12. [Améliorations futures](#améliorations-futures)
 
 ---
 
-## 🔥 Règles Firewall
+## 🎯 Vue d'ensemble
 
-### Politique Générale
-- **INPUT :** DROP (par défaut)
-- **FORWARD :** DROP (par défaut)
-- **OUTPUT :** ACCEPT
+Ce projet implémente une infrastructure complète de 3 serveurs virtuels sous Ubuntu Server 22.04 LTS, comprenant :
 
-### Règles Principales
+- **Services réseau** : DNS local, reverse proxy HTTPS
+- **Conteneurisation** : Application web avec Docker Compose
+- **Monitoring** : Stack Prometheus + Grafana pour la supervision
+- **Sauvegardes automatisées** : Système de backup quotidien avec rsync
 
-NAT vers Internet : iptables -t nat -A POSTROUTING -o enp0s3 -j MASQUERADE
-Admin → Tous : iptables -A FORWARD -s 10.10.99.0/24 -j ACCEPT
-DMZ → Internet : iptables -A FORWARD -s 10.10.10.0/24 -o enp0s3 -j ACCEPT
-DMZ → Database : iptables -A FORWARD -s 10.10.10.0/24 -d 10.10.20.40 -p tcp --dport 5432 -j ACCEPT
-DMZ → DNS : iptables -A FORWARD -s 10.10.10.0/24 -d 10.10.20.30 -p udp --dport 53 -j ACCEPT
-Services ↔ Services : iptables -A FORWARD -s 10.10.20.0/24 -d 10.10.20.0/24 -j ACCEPT
-Services → Internet : iptables -A FORWARD -s 10.10.20.0/24 -o enp0s3 -j ACCEPT
-Monitoring → Tous : iptables -A FORWARD -s 10.10.20.50 -p tcp --dport 9100 -j ACCEPT
+### Objectifs pédagogiques
 
----
-
-## 🛠️ Services Installés
-
-### VM1-Admin
-- **Ansible 2.12+** : Gestion centralisée de la configuration
-- **Playbooks** : Déploiement automatique de tous les services
-- **SSH** : Connexion sans mot de passe vers toutes les VMs
-
-### VM2-Web (DMZ)
-- **Nginx** : Serveur web HTTP
-- **Docker + Docker Compose** : Conteneurisation d'applications
-- **Node Exporter** : Métriques système pour Prometheus
-
-### VM3-DNS (Services)
-- **Bind9** : Serveur DNS autoritaire pour la zone lab.local
-- **Résolution de noms** : Tous les hosts de l'infrastructure
-- **Zones inverses** : Résolution IP → nom
-
-### VM4-Database (Services)
-- **PostgreSQL 16** : Base de données relationnelle
-- **Base de données** : app_prod
-- **Utilisateur** : appuser
-- **Accès réseau** : Configuré pour DMZ et Admin
-
-### VM5-Monitoring (Services)
-- **Prometheus** : Collecte de métriques
-- **Grafana** : Visualisation et dashboards
-- **Node Exporter** : Installé sur toutes les VMs
-
-### VM6-Firewall
-- **iptables** : Filtrage de paquets et règles de sécurité
-- **Routage inter-VLAN** : Communication contrôlée entre réseaux
-- **NAT** : Accès Internet pour toutes les VMs
+- Administration système Linux
+- Configuration de services réseau
+- Conteneurisation avec Docker
+- Automatisation (scripts, cron)
+- Monitoring et supervision
+- Gestion des sauvegardes
 
 ---
 
-## 🚀 Installation
+## 🏗️ Architecture
+
+### Schéma global
+
+![alt text](image.png)
+
+# PROJET INFRASTRUCTURE RÉSEAUX - SERVICES LINUX
+
+## 👤 Informations
+
+- **Étudiant** : [TON NOM]
+- **Formation** : 2ème année Informatique - Spécialisation Cybersécurité
+- **Date** : 26 Janvier 2026
+- **Projet** : Infrastructure réseau Linux avec services, conteneurisation, monitoring et backups
+
+---
+
+## 📋 Table des matières
+
+1. [Vue d'ensemble](#vue-densemble)
+2. [Architecture](#architecture)
+3. [Services déployés](#services-déployés)
+4. [Configuration réseau](#configuration-réseau)
+5. [Déploiement](#déploiement)
+6. [Accès aux services](#accès-aux-services)
+7. [Sauvegardes](#sauvegardes)
+8. [Monitoring](#monitoring)
+9. [Sécurité](#sécurité)
+10. [Commandes utiles](#commandes-utiles)
+11. [Troubleshooting](#troubleshooting)
+12. [Améliorations futures](#améliorations-futures)
+
+---
+
+## 🎯 Vue d'ensemble
+
+Ce projet implémente une infrastructure complète de 3 serveurs virtuels sous Ubuntu Server 22.04 LTS, comprenant :
+
+- **Services réseau** : DNS local, reverse proxy HTTPS
+- **Conteneurisation** : Application web avec Docker Compose
+- **Monitoring** : Stack Prometheus + Grafana pour la supervision
+- **Sauvegardes automatisées** : Système de backup quotidien avec rsync
+
+### Objectifs pédagogiques
+
+- Administration système Linux
+- Configuration de services réseau
+- Conteneurisation avec Docker
+- Automatisation (scripts, cron)
+- Monitoring et supervision
+- Gestion des sauvegardes
+
+---
+
+## 🏗️ Architecture
+
+### Schéma global
+```
+┌─────────────────────────────────────────────────────┐
+│              INTERNET / HÔTE WINDOWS                │
+└───────────────────┬─────────────────────────────────┘
+                    │ Port Forwarding (NAT)
+        ┌───────────┼───────────┐
+        │           │           │
+   ┌────▼────┐ ┌────▼────┐ ┌────▼────┐
+   │ Gateway │ │   App   │ │ Backup  │
+   │  .10    │ │  .11    │ │  .12    │
+   └────┬────┘ └────┬────┘ └────┬────┘
+        │           │           │
+        └───────────┼───────────┘
+                    │
+          Réseau interne 192.168.1.0/24
+```
+
+### Détails des VMs
+
+| VM | Hostname | IP | RAM | Disque | Rôle |
+|----|----------|--------|-----|--------|------|
+| Gateway | gateway | 192.168.1.10 | 1 GB | 10 GB | Point d'entrée, DNS, reverse proxy, monitoring |
+| App | gateway | 192.168.1.11 | 2 GB | 10 GB | Hébergement application conteneurisée |
+| Backup | gateway | 192.168.1.12 | 1 GB | 10 GB | Serveur de sauvegarde dédié |
+
+> **Note** : Les 3 VMs ont le hostname "gateway" mais sont distinguées par leur IP.
+
+---
+
+## 📦 Services déployés
+
+### VM1 - Gateway (192.168.1.10)
+
+**Services système :**
+- **dnsmasq** (port 53) : DNS local pour résolution de noms
+- **nginx** (ports 80/443) : Reverse proxy HTTPS avec certificat SSL
+- **prometheus-node-exporter** (port 9100) : Exposition métriques système
+
+**Conteneurs Docker :**
+- **prometheus** (port 9091) : Collecte et stockage des métriques
+- **grafana** (port 3001) : Visualisation et dashboards
+- **node-exporter** (port 9100) : Métriques système conteneurisées
+
+---
+
+### VM2 - App (192.168.1.11)
+
+**Services système :**
+- **docker** : Moteur de conteneurisation
+- **docker-compose** : Orchestration multi-conteneurs
+- **prometheus-node-exporter** (port 9100) : Exposition métriques système
+
+**Conteneurs Docker :**
+- **app-web** (nginx:alpine, port 8080) : Serveur web de l'application
+- **app-db** (mysql:8) : Base de données MySQL
+
+---
+
+### VM3 - Backup (192.168.1.12)
+
+**Services système :**
+- **rsync** : Outil de synchronisation
+- **cron** : Planificateur de tâches
+- **prometheus-node-exporter** (port 9100) : Exposition métriques système
+
+**Scripts personnalisés :**
+- **backup.sh** : Script de sauvegarde automatisé avec logging
+
+---
+
+## 🌐 Configuration réseau
+
+### Interfaces réseau
+
+Chaque VM possède **2 interfaces réseau** :
+
+**Carte 1 (enp0s3) - NAT :**
+- Accès Internet
+- Port forwarding vers Windows
+- Configuration DHCP
+
+**Carte 2 (enp0s8) - Réseau interne :**
+- Communication inter-VMs
+- Réseau 192.168.1.0/24
+- IP statiques
+
+### Configuration Netplan
+
+Exemple pour Gateway (`/etc/netplan/00-installer-config.yaml`) :
+```yaml
+network:
+  version: 2
+  ethernets:
+    enp0s3:
+      dhcp4: true
+    enp0s8:
+      addresses:
+        - 192.168.1.10/24
+```
+
+### Port forwarding VirtualBox
+
+| Service | VM | Port hôte | Port invité |
+|---------|-----|-----------|-------------|
+| SSH Gateway | Gateway | 2221 | 22 |
+| SSH App | App | 2222 | 22 |
+| SSH Backup | Backup | 2223 | 22 |
+| HTTP | Gateway | 80 | 80 |
+| HTTPS | Gateway | 443 | 443 |
+| Application | App | 8080 | 8080 |
+| Grafana | Gateway | 3001 | 3001 |
+| Prometheus | Gateway | 9091 | 9091 |
+
+---
+
+## 🚀 Déploiement
 
 ### Prérequis
 
-- **VirtualBox** 6.1 ou supérieur
-- **Ubuntu Server 22.04 ISO**
-- **PC hôte** : 16GB RAM minimum, 200GB disque libre
+- VirtualBox installé
+- Ubuntu Server 22.04 LTS (ISO)
+- 4 GB RAM minimum sur la machine hôte
+- 30 GB d'espace disque libre
 
-### Étape 1 : Créer les Réseaux VirtualBox
+### Installation des VMs
 
-**Linux/Mac :**
-VBoxManage hostonlyif create
-VBoxManage hostonlyif ipconfig vboxnet0 --ip 10.10.10.1 --netmask 255.255.255.0
-VBoxManage hostonlyif create
-VBoxManage hostonlyif ipconfig vboxnet1 --ip 10.10.20.1 --netmask 255.255.255.0
-VBoxManage hostonlyif create
-VBoxManage hostonlyif ipconfig vboxnet2 --ip 10.10.99.1 --netmask 255.255.255.0
+1. **Créer 3 VMs dans VirtualBox**
+   - OS : Ubuntu Server 22.04 LTS
+   - Configurer 2 cartes réseau par VM (NAT + Réseau interne)
+   - Configurer le port forwarding
 
-**Windows :**
-Créer via VirtualBox → Fichier → Gestionnaire de réseau hôte
+2. **Configuration réseau**
+```bash
+   sudo nano /etc/netplan/00-installer-config.yaml
+   # Configurer les IPs statiques
+   sudo netplan apply
+```
 
-### Étape 2 : Installer VM6-Firewall (En Premier)
+3. **Installation des services**
 
-1. Créer une VM Ubuntu Server 22.04
-2. Configurer 4 interfaces réseau :
-   - Adapter 1 : NAT
-   - Adapter 2 : vboxnet0 (DMZ)
-   - Adapter 3 : vboxnet1 (Services)
-   - Adapter 4 : vboxnet2 (Admin)
-3. Installer Ubuntu Server
-4. Configurer netplan avec les 4 IPs
-5. Activer le routage IP : echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
-6. Configurer iptables avec le script firewall-rules.sh
+   **Gateway :**
+```bash
+   # DNS
+   sudo apt install dnsmasq -y
+   
+   # Reverse proxy
+   sudo apt install nginx -y
+   
+   # Monitoring
+   sudo apt install prometheus-node-exporter -y
+   
+   # Docker pour la stack monitoring
+   curl -fsSL https://get.docker.com | sudo sh
+   sudo apt install docker-compose -y
+```
 
-### Étape 3 : Installer VM1-Admin
+   **App :**
+```bash
+   # Docker
+   curl -fsSL https://get.docker.com | sudo sh
+   sudo apt install docker-compose -y
+   
+   # Monitoring
+   sudo apt install prometheus-node-exporter -y
+```
 
-1. Créer une VM Ubuntu Server 22.04
-2. 1 interface réseau : vboxnet2 (Admin)
-3. IP : 10.10.99.10/24
-4. Gateway : 10.10.99.1
-5. Installer Ansible : sudo apt install -y ansible
-6. Configurer les clés SSH
-
-### Étape 4 : Cloner et Configurer les Autres VMs
-
-**Cloner VM1-Admin 4 fois, puis configurer pour chaque VM :**
-
-- **VM2-Web** : Réseau vboxnet0, IP 10.10.10.20, Hostname web.lab.local
-- **VM3-DNS** : Réseau vboxnet1, IP 10.10.20.30, Hostname dns.lab.local
-- **VM4-Database** : Réseau vboxnet1, IP 10.10.20.40, Hostname db.lab.local
-- **VM5-Monitoring** : Réseau vboxnet1, IP 10.10.20.50, Hostname monitoring.lab.local
-
-**Pour chaque clone :**
-1. Régénérer les clés SSH : sudo rm /etc/ssh/ssh_host_* && sudo dpkg-reconfigure openssh-server
-2. Changer hostname : sudo hostnamectl set-hostname <nom>.lab.local
-3. Modifier netplan avec la nouvelle IP
-4. Redémarrer : sudo reboot
-
-### Étape 5 : Déploiement Automatique avec Ansible
-
-cd ~/ansible-lab
-ansible-playbook playbooks/00-deploy-all.yml
-
-**Temps total de déploiement : 15-20 minutes**
+   **Backup :**
+```bash
+   # Outils backup
+   sudo apt install rsync -y
+   
+   # Monitoring
+   sudo apt install prometheus-node-exporter -y
+```
 
 ---
 
-## 🧪 Tests et Validation
+## 🌐 Accès aux services
 
-### Script de Tests Automatique
+### Depuis le navigateur Windows
 
-./test-infrastructure.sh
+| Service | URL | Login |
+|---------|-----|-------|
+| Application web | http://localhost:8080 | - |
+| Reverse proxy HTTPS | https://localhost | - |
+| Grafana | http://localhost:3001 | admin / admin123 |
+| Prometheus | http://localhost:9091 | - |
 
-### Tests Manuels
+### Connexions SSH
+```bash
+# Gateway
+ssh adminn@localhost -p 2221
 
-#### Test 1 : Connectivité Réseau
-ping -c 2 web.lab.local
-ping -c 2 db.lab.local
-ping -c 2 monitoring.lab.local
-ping -c 2 8.8.8.8
+# App
+ssh adminn@localhost -p 2222
 
-**Résultat attendu :** Toutes les résolutions et pings réussissent
-
-#### Test 2 : DNS
-dig web.lab.local
-nslookup db.lab.local
-dig -x 10.10.10.20
-
-**Résultat attendu :** Résolution correcte des noms
-
-#### Test 3 : Serveur Web
-curl http://web.lab.local
-
-**Résultat attendu :** Page HTML affichée avec "Infrastructure Lab"
-
-#### Test 4 : PostgreSQL
-PGPASSWORD=SecureP@ssw0rd2025 psql -h db.lab.local -U appuser -d app_prod -c "SELECT * FROM test_table;"
-
-**Résultat attendu :** 3 lignes de données affichées
-
-#### Test 5 : Monitoring
-- **Prometheus :** http://10.10.20.50:9090
-- **Grafana :** http://10.10.20.50:3000 (admin/admin)
-
-**Résultat attendu :**
-- 7 targets UP dans Prometheus (prometheus + 6 node_exporters)
-- Dashboard Node Exporter affiche les 6 VMs
+# Backup
+ssh adminn@localhost -p 2223
+```
 
 ---
 
-## 📊 Accès aux Services
+## 💾 Sauvegardes
 
-| Service | URL | Identifiants |
-|---------|-----|--------------|
-| **Nginx** | http://10.10.10.20 | - |
-| **Prometheus** | http://10.10.20.50:9090 | - |
-| **Grafana** | http://10.10.20.50:3000 | admin / admin |
-| **PostgreSQL** | db.lab.local:5432 | appuser / SecureP@ssw0rd2025 |
+### Fonctionnement
+
+Le système de sauvegarde utilise **rsync** pour synchroniser les données de la VM App vers la VM Backup.
+
+### Caractéristiques
+
+- **Fréquence** : Quotidienne à 2h du matin (cron)
+- **Méthode** : Rsync incrémental via SSH
+- **Authentification** : Clés SSH (sans mot de passe)
+- **Rétention** : 7 jours (nettoyage automatique)
+- **Logging** : `/var/log/backup.log`
+
+### Script de backup
+
+Emplacement : `~/backup/backup.sh`
+```bash
+#!/bin/bash
+set -e
+
+BACKUP_DIR="/home/adminn/backup/data"
+DATE=$(date +%Y%m%d_%H%M%S)
+LOG_FILE="/var/log/backup.log"
+SOURCE_HOST="192.168.1.11"
+SOURCE_USER="adminn"
+SOURCE_PATH="/home/adminn/app"
+
+mkdir -p "$BACKUP_DIR"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | sudo tee -a "$LOG_FILE"
+}
+
+log "=== Début du backup ==="
+log "Source: $SOURCE_USER@$SOURCE_HOST:$SOURCE_PATH"
+log "Destination: $BACKUP_DIR/app_$DATE/"
+
+if rsync -avz --delete \
+    "$SOURCE_USER@$SOURCE_HOST:$SOURCE_PATH/" \
+    "$BACKUP_DIR/app_$DATE/" >> "$LOG_FILE" 2>&1; then
+    
+    log "✅ Backup terminé avec succès"
+    log "Emplacement: $BACKUP_DIR/app_$DATE/"
+else
+    log "❌ ERREUR: Le backup a échoué !"
+    exit 1
+fi
+
+log "Nettoyage des backups > 7 jours..."
+find "$BACKUP_DIR" -type d -name "app_*" -mtime +7 -exec rm -rf {} \; 2>/dev/null || true
+
+log "=== Fin du backup ==="
+```
+
+### Planification cron
+```bash
+# Éditer la crontab
+crontab -e
+
+# Tâche planifiée
+0 2 * * * /home/adminn/backup/backup.sh
+```
+
+### Restauration
+
+Restaurer depuis un backup :
+```bash
+# Depuis la VM Backup
+DERNIER_BACKUP=$(ls -t ~/backup/data/ | head -1)
+rsync -avz ~/backup/data/$DERNIER_BACKUP/ adminn@192.168.1.11:/home/adminn/app/
+```
+
+---
+
+## 📊 Monitoring
+
+### Stack Prometheus + Grafana
+
+**Architecture :**
+```
+Node Exporter (chaque VM)
+    ↓ expose métriques (port 9100)
+Prometheus (Gateway)
+    ↓ collecte toutes les 15s
+Grafana (Gateway)
+    → dashboards visuels
+```
+
+### Configuration Prometheus
+
+Fichier : `~/monitoring/prometheus.yml`
+```yaml
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'gateway'
+    static_configs:
+      - targets: ['192.168.1.10:9100']
+        labels:
+          instance: 'gateway'
+
+  - job_name: 'app'
+    static_configs:
+      - targets: ['192.168.1.11:9100']
+        labels:
+          instance: 'app'
+
+  - job_name: 'backup'
+    static_configs:
+      - targets: ['192.168.1.12:9100']
+        labels:
+          instance: 'backup'
+```
+
+### Docker Compose monitoring
+
+Fichier : `~/monitoring/docker-compose.yml`
+```yaml
+version: '3.8'
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    restart: unless-stopped
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    ports:
+      - "9100:9100"
+    command:
+      - '--path.rootfs=/host'
+    volumes:
+      - /:/host:ro
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  grafana-data:
+```
+
+### Métriques collectées
+
+- **CPU** : Utilisation, load average
+- **RAM** : Utilisation, disponible, cache
+- **Disque** : Espace utilisé, I/O
+- **Réseau** : Bande passante, paquets, erreurs
+
+### Dashboards Grafana
+
+**Dashboard Node Exporter (ID: 1860)**
+- Vue complète d'une VM
+- CPU, RAM, disque, réseau
+- Processus, uptime
+
+---
+
+## 🔒 Sécurité
+
+### Mesures implémentées
+
+**Réseau :**
+- Réseau interne isolé (192.168.1.0/24)
+- Exposition minimale (port forwarding sélectif)
+- Pas d'accès direct depuis Internet
+
+**Chiffrement :**
+- HTTPS sur Nginx (certificat SSL auto-signé)
+- SSH avec authentification par clés
+- Pas de mots de passe en clair
+
+**Isolation :**
+- Conteneurs Docker (isolation applicative)
+- Séparation des services sur VMs distinctes
+- Principe du moindre privilège
+
+**Backups :**
+- Serveur dédié (isolation)
+- Connexion SSH sécurisée
+- Logs de tous les backups
+
+### Certificat SSL
+
+Génération du certificat auto-signé :
+```bash
+sudo mkdir -p /etc/nginx/ssl
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout /etc/nginx/ssl/nginx.key \
+  -out /etc/nginx/ssl/nginx.crt \
+  -subj "/C=FR/ST=France/L=Paris/O=Projet/CN=gateway.local"
+```
+
+### SSH par clés
+
+Configuration pour le backup automatisé :
+```bash
+# Sur VM Backup
+ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa
+ssh-copy-id adminn@192.168.1.11
+
+# Test
+ssh adminn@192.168.1.11 "echo 'SSH OK'"
+```
+
+---
+
+## 🛠️ Commandes utiles
+
+### Vérification de l'infrastructure
+
+**Gateway :**
+```bash
+ssh adminn@localhost -p 2221
+
+# Services
+sudo systemctl status dnsmasq nginx prometheus-node-exporter
+
+# Conteneurs
+docker ps
+
+# Réseau
+ip a
+ping -c 3 192.168.1.11
+ping -c 3 192.168.1.12
+```
+
+**App :**
+```bash
+ssh adminn@localhost -p 2222
+
+# Application
+cd ~/app
+docker-compose ps
+docker-compose logs
+
+# Test local
+curl http://localhost:8080
+```
+
+**Backup :**
+```bash
+ssh adminn@localhost -p 2223
+
+# Backups
+ls -lh ~/backup/data/
+
+# Logs
+cat /var/log/backup.log
+
+# Cron
+crontab -l
+
+# Test backup
+~/backup/backup.sh
+```
+
+### Gestion des services
+```bash
+# Démarrer/arrêter/redémarrer
+sudo systemctl start|stop|restart <service>
+
+# Statut
+sudo systemctl status <service>
+
+# Activer au démarrage
+sudo systemctl enable <service>
+
+# Logs
+sudo journalctl -u <service> -n 50
+```
+
+### Docker
+```bash
+# Lister les conteneurs
+docker ps
+
+# Logs d'un conteneur
+docker logs <container_name>
+
+# Redémarrer un conteneur
+docker restart <container_name>
+
+# Docker Compose
+docker-compose up -d
+docker-compose down
+docker-compose ps
+docker-compose logs
+```
 
 ---
 
 ## 🔧 Troubleshooting
 
-### Problème : VM ne peut pas accéder à Internet
+### Problèmes courants
 
-**Diagnostic :**
-ip route
+**Problème : VM ne répond plus**
+```bash
+# Depuis VirtualBox, redémarrer la VM
+# Vérifier les logs
+ssh adminn@localhost -p XXXX
+sudo journalctl -p err -b
+```
+
+**Problème : Service ne démarre pas**
+```bash
+sudo systemctl status <service>
+sudo journalctl -u <service> -n 100
+```
+
+**Problème : Conteneur ne démarre pas**
+```bash
+docker-compose logs <service>
+docker-compose restart <service>
+```
+
+**Problème : Réseau ne fonctionne pas**
+```bash
+# Vérifier la config
+cat /etc/netplan/00-installer-config.yaml
+
+# Réappliquer
+sudo netplan apply
+
+# Tester
 ping 8.8.8.8
+ping 192.168.1.XX
+```
 
-**Solution :**
-ssh inoco@firewall.lab.local
-sudo iptables -L FORWARD -n -v
-# Vérifier que les règles FORWARD existent pour le VLAN concerné
+**Problème : Backup échoue**
+```bash
+# Voir les logs
+cat /var/log/backup.log
 
-### Problème : DNS ne résout pas les noms
+# Tester SSH
+ssh adminn@192.168.1.11 "echo OK"
 
-**Diagnostic :**
-cat /etc/resolv.conf
-# Doit contenir : nameserver 10.10.20.30
-
-**Solution :**
-# Désactiver systemd-resolved
-sudo systemctl stop systemd-resolved
-sudo systemctl disable systemd-resolved
-sudo rm /etc/resolv.conf
-echo "nameserver 10.10.20.30" | sudo tee /etc/resolv.conf
-sudo chattr +i /etc/resolv.conf
-
-### Problème : Ansible "Permission denied"
-
-**Solution :**
-# Reconfigurer les clés SSH
-ssh-copy-id inoco@<IP_VM>
-# Vérifier sudo sans mot de passe
-ssh inoco@<IP_VM> "sudo whoami"
-# Doit afficher "root" sans demander de mot de passe
-
-### Problème : PostgreSQL refuse la connexion
-
-**Diagnostic :**
-nc -zv db.lab.local 5432
-
-**Solution :**
-# Vérifier pg_hba.conf
-ssh inoco@db.lab.local
-sudo nano /etc/postgresql/*/main/pg_hba.conf
-# Ajouter : host all all 10.10.0.0/16 md5
-sudo systemctl restart postgresql
+# Tester rsync manuellement
+rsync -avz adminn@192.168.1.11:/home/adminn/app/ /tmp/test/
+```
 
 ---
 
-## 📁 Structure du Projet
-
-ansible-lab/
-├── README.md
-├── deploy.sh
-├── test-infrastructure.sh
-├── ansible.cfg
-├── inventories/
-│   └── hosts.yml
-├── group_vars/
-├── host_vars/
-├── playbooks/
-│   ├── 00-deploy-all.yml
-│   ├── 01-update-all.yml
-│   ├── 02-install-docker.yml
-│   ├── 03-install-nginx.yml
-│   ├── 04-install-bind9.yml
-│   ├── 09-disable-systemd-resolved.yml
-│   ├── 10-install-postgresql.yml
-│   ├── 11-install-monitoring.yml
-│   └── 12-install-node-exporter.yml
-├── roles/
-├── files/
-└── templates/
-
----
-
-## 🎓 Points Clés pour la Soutenance
-
-### Architecture
-✅ Segmentation réseau en 3 VLANs distincts
-✅ Firewall centralisé avec règles strictes par VLAN
-✅ DMZ pour isoler les services exposés sur Internet
-✅ Principe de défense en profondeur
-
-### Sécurité
-✅ Principe du moindre privilège (règles iptables restrictives)
-✅ Filtrage inter-VLAN (DROP par défaut)
-✅ Base de données non exposée directement à Internet
-✅ Services critiques isolés dans le VLAN Services
+## 🚀 Améliorations futures
 
 ### Automatisation
-✅ Déploiement complet via Ansible
-✅ Infrastructure as Code (reproductible)
-✅ Playbooks modulaires et réutilisables
-✅ Tests automatisés
 
-### Monitoring
-✅ Supervision complète avec Prometheus
-✅ Dashboards Grafana pour visualisation
-✅ Métriques système sur toutes les VMs
-✅ Alerting possible (évolution future)
+- **Ansible** : Playbooks pour déployer l'infra en 1 commande
+- **Terraform** : Infrastructure as Code pour provisionner les VMs
+- **CI/CD** : Pipeline GitLab CI / GitHub Actions
 
----
+### Haute disponibilité
 
-## 📈 Améliorations Futures
+- **Load balancer** : HAProxy devant plusieurs VMs App
+- **Réplication** : MySQL Master-Slave
+- **Cluster** : Docker Swarm ou Kubernetes
 
-- HTTPS avec certificats Let's Encrypt ou auto-signés
-- Sauvegardes automatisées avec Restic
-- AlertManager pour les alertes Prometheus
-- Application web conteneurisée (WordPress, Nextcloud)
-- CI/CD avec GitLab Runner
-- Haute disponibilité pour les services critiques
-- Logs centralisés avec ELK Stack
+### Monitoring avancé
 
----
+- **Alerting** : Notifications Slack/Email via Alertmanager
+- **Métriques applicatives** : Temps de réponse, taux d'erreur
+- **Logs centralisés** : ELK Stack (Elasticsearch, Logstash, Kibana)
 
-## 📚 Documentation Technique
+### Sécurité
 
-### Commandes Utiles Ansible
+- **Certificats Let's Encrypt** : SSL reconnu par les navigateurs
+- **Firewall** : UFW configuré sur chaque VM
+- **Fail2ban** : Protection contre les bruteforces
+- **Backup chiffré** : GPG pour chiffrer les backups
+- **Backup cloud** : Réplication vers S3/Azure
 
-# Test connectivité
-ansible all -m ping
+### Backup
 
-# Exécuter une commande sur toutes les VMs
-ansible all -a "hostname"
-
-# Redémarrer un service
-ansible web.lab.local -b -a "systemctl restart nginx"
-
-# Déployer un service spécifique
-ansible-playbook playbooks/02-install-docker.yml
-
-### Commandes Utiles PostgreSQL
-
-# Connexion
-psql -h db.lab.local -U appuser -d app_prod
-
-# Backup
-pg_dump -h db.lab.local -U appuser app_prod > backup.sql
-
-# Restore
-psql -h db.lab.local -U appuser -d app_prod < backup.sql
-
-# Lister les connexions actives
-SELECT * FROM pg_stat_activity;
-
-### Commandes Utiles Prometheus
-
-# Recharger la configuration
-curl -X POST http://10.10.20.50:9090/-/reload
-
-# Vérifier les targets
-curl http://10.10.20.50:9090/api/v1/targets
-
-# Query via API
-curl 'http://10.10.20.50:9090/api/v1/query?query=up'
-
-### Commandes Utiles Firewall
-
-# Voir toutes les règles
-sudo iptables -L -n -v
-
-# Voir les règles NAT
-sudo iptables -t nat -L -n -v
-
-# Sauvegarder les règles
-sudo iptables-save > /etc/iptables/rules.v4
-
-# Recharger les règles
-sudo /etc/firewall-rules.sh
+- **Règle 3-2-1** : 3 copies, 2 supports, 1 hors site
+- **Tests automatisés** : Vérification régulière des restaurations
+- **BorgBackup** : Déduplication et compression
+- **Versioning** : Plusieurs versions de fichiers
 
 ---
 
-## 🔒 Sécurité et Bonnes Pratiques
+## 📚 Technologies utilisées
 
-### Credentials par Défaut à Changer
+| Catégorie | Technologies |
+|-----------|--------------|
+| OS | Ubuntu Server 22.04 LTS |
+| Virtualisation | VirtualBox |
+| Conteneurisation | Docker, Docker Compose |
+| Web | Nginx |
+| DNS | dnsmasq |
+| Base de données | MySQL 8 |
+| Monitoring | Prometheus, Grafana, Node Exporter |
+| Backup | rsync, cron, Bash |
+| Sécurité | OpenSSL, SSH |
+| Réseau | netplan, systemd |
 
-- **Grafana** : admin / admin → À changer au premier login
-- **PostgreSQL** : appuser / SecureP@ssw0rd2025 → À changer en production
-- **SSH** : Clés SSH configurées, mot de passe désactivé pour plus de sécurité
+---
 
-### Recommandations de Sécurité
+## 📝 Compétences démontrées
 
-1. **Changer tous les mots de passe par défaut**
-2. **Activer le fail2ban** sur toutes les VMs exposées
-3. **Configurer des sauvegardes régulières** de la base de données
-4. **Mettre en place HTTPS** avec des certificats valides
-5. **Activer les logs centralisés** pour l'audit
-6. **Configurer AlertManager** pour être notifié des incidents
+- ✅ Administration système Linux
+- ✅ Configuration réseau (IP statiques, NAT, port forwarding)
+- ✅ Virtualisation (VirtualBox)
+- ✅ Services réseau (DNS, reverse proxy HTTPS)
+- ✅ Conteneurisation (Docker, Docker Compose)
+- ✅ Scripting Bash
+- ✅ Automatisation (cron, scripts)
+- ✅ Monitoring et supervision
+- ✅ Sauvegardes et restauration
+- ✅ Sécurité (SSL/TLS, SSH, isolation)
+- ✅ Documentation technique
+
+---
+
+## 📄 Licence
+
+Projet réalisé dans le cadre de la formation en Cybersécurité - 2026
+
+---
+
+## 👨‍💻 Auteur
+
+**[TON NOM]**  
+Étudiant en 2ème année Informatique - Spécialisation Cybersécurité
+
+---
+
+**Projet réalisé en janvier 2026** 🚀
